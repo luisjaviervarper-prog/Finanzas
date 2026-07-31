@@ -265,12 +265,14 @@
 
         <label class="field-label">Precio de compra (€ total pagado)</label>
         <input type="number" id="stockBuyPriceInput" min="0" step="0.01" placeholder="Ej. 5200">
+        <div class="card-muted" id="stockBuyPerShareHint" style="margin:-6px 0 12px;"></div>
 
         <label class="field-label">Nº de acciones</label>
         <input type="number" id="stockNumSharesInput" min="0" step="1" placeholder="Ej. 1000">
 
         <label class="field-label">Precio de venta (€ total recibido)</label>
         <input type="number" id="stockSellPriceInput" min="0" step="0.01" placeholder="Ej. 6100">
+        <div class="card-muted" id="stockSellPerShareHint" style="margin:-6px 0 12px;"></div>
 
         <label class="field-label">Banco</label>
         <select id="stockBankSelect"></select>
@@ -646,6 +648,7 @@ function resetStockForm(){
   document.getElementById('stockFormTitle').textContent = 'Nuevas acciones';
   document.getElementById('btnSaveStock').textContent = '＋ Añadir acción';
   document.getElementById('btnCancelStockEdit').style.display = 'none';
+  updateStockPerShareHints();
 }
 async function startEditStock(id){
   const stock = await dbGet('stockEntries', id);
@@ -667,6 +670,7 @@ async function startEditStock(id){
   document.getElementById('stockFormTitle').textContent = 'Editar acción';
   document.getElementById('btnSaveStock').textContent = '💾 Guardar cambios';
   document.getElementById('btnCancelStockEdit').style.display = 'block';
+  updateStockPerShareHints();
   go('stock-form');
   document.querySelector('#screen-stock-form .content').scrollTop = 0;
 }
@@ -713,6 +717,30 @@ document.getElementById('btnClearStockSellDate').addEventListener('click', () =>
   label.textContent = 'Sin fecha seleccionada';
   label.classList.remove('selected');
 });
+/* ---------- previsualización en vivo del precio por acción (compra / venta) ---------- */
+function updateStockPerShareHints(){
+  const precioCompraTotal = parseFloat(document.getElementById('stockBuyPriceInput').value);
+  const numAcciones = parseFloat(document.getElementById('stockNumSharesInput').value);
+  const precioVentaTotal = parseFloat(document.getElementById('stockSellPriceInput').value);
+
+  const buyHint = document.getElementById('stockBuyPerShareHint');
+  if (precioCompraTotal > 0 && numAcciones > 0) {
+    buyHint.textContent = `≈ ${round2(precioCompraTotal / numAcciones).toFixed(4)} €/acc. de compra`;
+  } else {
+    buyHint.textContent = '';
+  }
+
+  const sellHint = document.getElementById('stockSellPerShareHint');
+  if (precioVentaTotal > 0 && numAcciones > 0) {
+    sellHint.textContent = `≈ ${round2(precioVentaTotal / numAcciones).toFixed(4)} €/acc. de venta`;
+  } else {
+    sellHint.textContent = '';
+  }
+}
+['stockBuyPriceInput', 'stockNumSharesInput', 'stockSellPriceInput'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updateStockPerShareHints);
+});
+
 document.getElementById('stockBankSelect').addEventListener('change', (e) => handleBankSelectChange(e.target));
 document.getElementById('btnCancelStockEdit').addEventListener('click', resetStockForm);
 document.getElementById('btnSaveStock').addEventListener('click', async () => {
