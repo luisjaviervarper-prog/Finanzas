@@ -229,12 +229,33 @@
         <button class="btn-ember" id="btnOpenStocksHub">📈 Acciones</button>
         <button class="btn-outline" id="btnLockNow">🔒 Bloquear ahora</button>
         <button class="btn-outline" id="btnResetPin">🔑 Cambiar PIN / huella</button>
+        <button class="btn-outline" id="btnExportBackup">⬇️ Exportar copia de seguridad</button>
+        <button class="btn-outline" id="btnImportBackup">⬆️ Importar copia de seguridad</button>
+        <input type="file" id="importBackupFileInput" accept="application/json,.json" style="display:none;">
       </div>
       <p class="help-text">
         Tus datos se guardan de forma privada en este navegador, en este móvil.
       </p>
     </div>
   </section>
+
+  <!-- ===================== COPIA DE SEGURIDAD (exportar / importar, cifrado con contraseña) ===================== -->
+  <div id="backupModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <div class="card-title" id="backupModalTitle" style="text-align:center; margin-bottom:6px;">Copia de seguridad</div>
+      <p class="help-text" id="backupModalHelp"></p>
+      <label class="field-label">Contraseña</label>
+      <input type="password" id="backupPasswordInput" placeholder="Contraseña de la copia">
+      <div id="backupPasswordConfirmWrap" style="display:none;">
+        <label class="field-label">Confirmar contraseña</label>
+        <input type="password" id="backupPasswordConfirmInput" placeholder="Repite la contraseña">
+      </div>
+      <div class="help-text" id="backupModalError" style="color:var(--state-error);"></div>
+      <button class="btn-ember" id="btnBackupModalConfirm">Continuar</button>
+      <button class="btn-outline" id="btnBackupModalCancel" style="margin-top:0;">Cancelar</button>
+    </div>
+  </div>
+
 
   <!-- ===================== ACCIONES: MENÚ ===================== -->
   <section id="screen-stocks-hub" class="screen">
@@ -1278,6 +1299,169 @@ document.addEventListener('visibilitychange', () => {
     const isUnlocked = !document.getElementById('screen-lock').classList.contains('active');
     if (wasHiddenLong && isUnlocked && hasPinConfigured()) lockNow();
     lastHiddenAt = null;
+  }
+});
+
+/* ======================================================================
+   COPIA DE SEGURIDAD: exportar/importar todos los datos, cifrados con
+   una contraseña (AES-GCM + PBKDF2). El archivo resultante es un .json
+   que se puede llevar a cualquier otro dispositivo/instalación de esta
+   misma app; solo se puede abrir sabiendo la contraseña usada al exportar.
+====================================================================== */
+const BACKUP_STORES = ['stockEntries', 'stockDividends', 'stockExpenses', 'stockBanks'];
+
+function bufferToBase64(buf){
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function base64ToBuffer(b64){
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+async function deriveBackupKey(password, saltBytes){
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: saltBytes, iterations: 200000, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+async function buildBackupFile(password){
+  const results = await Promise.all(BACKUP_STORES.map(s => dbGetAll(s)));
+  const data = {};
+  BACKUP_STORES.forEach((s, i) => { data[s] = results[i]; });
+  const payload = JSON.stringify({ exportedAt: Date.now(), data });
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveBackupKey(password, salt);
+  const ciphertextBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(payload));
+  return {
+    app: 'finanzas-backup',
+    version: 1,
+    salt: bytesToHex(salt),
+    iv: bytesToHex(iv),
+    ciphertext: bufferToBase64(ciphertextBuf)
+  };
+}
+function downloadBackupJson(backupObj){
+  const blob = new Blob([JSON.stringify(backupObj)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `finanzas_backup_${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+async function decryptBackupFile(fileText, password){
+  let backup;
+  try { backup = JSON.parse(fileText); }
+  catch (e) { throw new Error('El archivo elegido no es un JSON válido.'); }
+  if (backup.app !== 'finanzas-backup' || !backup.salt || !backup.iv || !backup.ciphertext) {
+    throw new Error('Este archivo no es una copia de seguridad de Finanzas.');
+  }
+  const salt = hexToBytes(backup.salt);
+  const iv = hexToBytes(backup.iv);
+  const key = await deriveBackupKey(password, salt);
+  let plainBuf;
+  try {
+    plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, base64ToBuffer(backup.ciphertext));
+  } catch (e) {
+    throw new Error('Contraseña incorrecta o archivo dañado.');
+  }
+  const payload = JSON.parse(new TextDecoder().decode(plainBuf));
+  return payload.data || {};
+}
+async function restoreBackupData(data){
+  const counts = {};
+  for (const storeName of BACKUP_STORES) {
+    const records = Array.isArray(data[storeName]) ? data[storeName] : [];
+    for (const record of records) await dbPut(storeName, record);
+    counts[storeName] = records.length;
+  }
+  return counts;
+}
+
+/* ---------- modal reutilizable para pedir la contraseña de exportación/importación ---------- */
+let backupModalMode = null; // 'export' | 'import'
+let backupModalFile = null;
+function openBackupModal(mode, file){
+  backupModalMode = mode;
+  backupModalFile = file || null;
+  document.getElementById('backupPasswordInput').value = '';
+  document.getElementById('backupPasswordConfirmInput').value = '';
+  document.getElementById('backupModalError').textContent = '';
+  const isExport = mode === 'export';
+  document.getElementById('backupModalTitle').textContent = isExport ? 'Exportar copia de seguridad' : 'Importar copia de seguridad';
+  document.getElementById('backupModalHelp').textContent = isExport
+    ? 'Crea una contraseña para proteger el archivo. La necesitarás para importarlo después, en este u otro dispositivo.'
+    : 'Introduce la contraseña que usaste al exportar esta copia de seguridad.';
+  document.getElementById('backupPasswordConfirmWrap').style.display = isExport ? 'block' : 'none';
+  document.getElementById('btnBackupModalConfirm').textContent = isExport ? 'Exportar' : 'Importar';
+  document.getElementById('backupModal').style.display = 'flex';
+}
+function closeBackupModal(){
+  document.getElementById('backupModal').style.display = 'none';
+  backupModalMode = null;
+  backupModalFile = null;
+}
+document.getElementById('btnExportBackup').addEventListener('click', () => openBackupModal('export'));
+document.getElementById('btnImportBackup').addEventListener('click', () => {
+  document.getElementById('importBackupFileInput').value = '';
+  document.getElementById('importBackupFileInput').click();
+});
+document.getElementById('importBackupFileInput').addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (file) openBackupModal('import', file);
+});
+document.getElementById('btnBackupModalCancel').addEventListener('click', closeBackupModal);
+document.getElementById('btnBackupModalConfirm').addEventListener('click', async () => {
+  const errorEl = document.getElementById('backupModalError');
+  const password = document.getElementById('backupPasswordInput').value;
+  errorEl.textContent = '';
+  if (!password || password.length < 4) { errorEl.textContent = 'Usa una contraseña de al menos 4 caracteres.'; return; }
+  const btn = document.getElementById('btnBackupModalConfirm');
+  const originalLabel = btn.textContent;
+  if (backupModalMode === 'export') {
+    const confirmPassword = document.getElementById('backupPasswordConfirmInput').value;
+    if (password !== confirmPassword) { errorEl.textContent = 'Las dos contraseñas no coinciden.'; return; }
+    btn.disabled = true; btn.textContent = 'Cifrando…';
+    try {
+      const backupObj = await buildBackupFile(password);
+      downloadBackupJson(backupObj);
+      closeBackupModal();
+      alert('Copia de seguridad exportada. Guarda bien el archivo y la contraseña: sin la contraseña no se puede recuperar.');
+    } catch (e) {
+      errorEl.textContent = 'No se pudo generar la copia de seguridad.';
+    } finally {
+      btn.disabled = false; btn.textContent = originalLabel;
+    }
+  } else {
+    if (!backupModalFile) { errorEl.textContent = 'No se ha seleccionado ningún archivo.'; return; }
+    btn.disabled = true; btn.textContent = 'Importando…';
+    try {
+      const fileText = await backupModalFile.text();
+      const data = await decryptBackupFile(fileText, password);
+      const counts = await restoreBackupData(data);
+      closeBackupModal();
+      alert(`Copia de seguridad importada: ${counts.stockEntries} acciones, ${counts.stockDividends} dividendos, ${counts.stockExpenses} gastos.`);
+      if (document.getElementById('screen-welcome').classList.contains('active')) {
+        // nada más que hacer aquí; las pantallas se recalculan al entrar en ellas
+      }
+    } catch (e) {
+      errorEl.textContent = e.message || 'No se pudo importar la copia de seguridad.';
+    } finally {
+      btn.disabled = false; btn.textContent = originalLabel;
+    }
   }
 });
 
