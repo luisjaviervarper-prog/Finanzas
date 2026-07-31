@@ -130,6 +130,15 @@
   .cal-weekdays{display:grid; grid-template-columns:repeat(7,1fr); gap:3px; margin-bottom:3px;}
   .cal-weekdays span{text-align:center; font-size:10px; color:var(--text-muted);}
   .cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:3px;}
+  .cal-grid-alt{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
+  .cal-cell-alt{
+    padding:16px 4px; display:flex; align-items:center; justify-content:center;
+    font-size:14px; border-radius:6px; background:var(--bg-ash-light); color:var(--text-light);
+    cursor:pointer;
+  }
+  .cal-cell-alt:active{outline:2px solid var(--accent-teal);}
+  .cal-cell-alt.cal-selected{background:var(--accent-teal); color:var(--bg-obsidian); font-weight:700;}
+  .cal-cell-alt.cal-dimmed{color:var(--text-muted);}
   .cal-cell{
     position:relative; aspect-ratio:1; display:flex; align-items:center; justify-content:center;
     font-size:11px; border-radius:4px; background:var(--bg-ash-light); color:var(--text-light);
@@ -137,6 +146,7 @@
   .cal-empty{background:none;}
   .cal-editable{cursor:pointer;}
   .cal-editable:active{outline:2px solid var(--accent-teal);}
+  .cal-editable.cal-selected{background:var(--accent-teal); color:var(--bg-obsidian); font-weight:700;}
   .modal-overlay{
     position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50;
     display:flex; align-items:center; justify-content:center; padding:20px;
@@ -154,10 +164,10 @@
     <div class="modal-box">
       <div style="display:flex; align-items:center; justify-content:center; gap:16px; margin-bottom:10px;">
         <button class="icon-btn" id="datePickerPrevMonth">◀</button>
-        <span class="card-title" id="datePickerLabel">Mes</span>
+        <button class="card-title" id="datePickerLabel" style="background:none; border:none; color:var(--text-light); cursor:pointer; padding:4px 8px;">Mes</button>
         <button class="icon-btn" id="datePickerNextMonth">▶</button>
       </div>
-      <div class="cal-weekdays">
+      <div class="cal-weekdays" id="datePickerWeekdays">
         <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
       </div>
       <div class="cal-grid" id="datePickerCalendar"></div>
@@ -473,8 +483,9 @@ window.addEventListener('popstate', (e) => {
   if (state.view === 'stock-results') renderStockResultsScreen();
 });
 
-/* ---------- selector de fecha reutilizable (calendario en modal) ---------- */
+/* ---------- selector de fecha reutilizable (calendario en modal, con niveles día/mes/año) ---------- */
 const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const MONTH_NAMES_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 function daysInMonth(year, month){ return new Date(year, month + 1, 0).getDate(); }
 function firstWeekdayMondayIndex(year, month){
   const d = new Date(year, month, 1).getDay();
@@ -483,47 +494,125 @@ function firstWeekdayMondayIndex(year, month){
 let datePickerCallback = null;
 let datePickerYear = new Date().getFullYear();
 let datePickerMonth = new Date().getMonth();
-function openDatePicker(onSelect, presetYear, presetMonth){
+let datePickerSelectedDay = null; // día seleccionado previamente (si lo había), null si no
+let datePickerLevel = 'day'; // 'day' | 'month' | 'year'
+
+function openDatePicker(onSelect, presetDateStr){
   datePickerCallback = onSelect;
-  datePickerYear = presetYear != null ? presetYear : new Date().getFullYear();
-  datePickerMonth = presetMonth != null ? presetMonth : new Date().getMonth();
-  renderDatePickerCalendar();
+  const today = new Date();
+  if (presetDateStr) {
+    const [y, m, d] = presetDateStr.split('-').map(Number);
+    datePickerYear = y;
+    datePickerMonth = m - 1;
+    datePickerSelectedDay = d;
+  } else {
+    datePickerYear = today.getFullYear();
+    datePickerMonth = today.getMonth();
+    datePickerSelectedDay = null;
+  }
+  datePickerLevel = 'day';
+  renderDatePicker();
   document.getElementById('datePickerModal').style.display = 'flex';
 }
 function closeDatePicker(){
   document.getElementById('datePickerModal').style.display = 'none';
   datePickerCallback = null;
 }
-function renderDatePickerCalendar(){
-  document.getElementById('datePickerLabel').textContent = `${MONTH_NAMES[datePickerMonth]} ${datePickerYear}`;
+function renderDatePicker(){
+  document.getElementById('datePickerWeekdays').style.display = datePickerLevel === 'day' ? 'grid' : 'none';
+  const grid = document.getElementById('datePickerCalendar');
+  grid.classList.toggle('cal-grid', datePickerLevel === 'day');
+  grid.classList.toggle('cal-grid-alt', datePickerLevel !== 'day');
+  if (datePickerLevel === 'day') renderDatePickerDays();
+  else if (datePickerLevel === 'month') renderDatePickerMonths();
+  else renderDatePickerYears();
+}
+function renderDatePickerDays(){
+  const label = document.getElementById('datePickerLabel');
+  label.textContent = `${MONTH_NAMES[datePickerMonth]} ${datePickerYear}`;
   const totalDays = daysInMonth(datePickerYear, datePickerMonth);
   const offset = firstWeekdayMondayIndex(datePickerYear, datePickerMonth);
   let cells = '';
   for (let i = 0; i < offset; i++) cells += `<div class="cal-cell cal-empty"></div>`;
   for (let day = 1; day <= totalDays; day++) {
     const dateStr = `${datePickerYear}-${String(datePickerMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    cells += `<div class="cal-cell cal-editable" data-date="${dateStr}">${day}</div>`;
+    const isSelected = datePickerSelectedDay === day;
+    cells += `<div class="cal-cell cal-editable${isSelected ? ' cal-selected' : ''}" data-date="${dateStr}">${day}</div>`;
   }
   document.getElementById('datePickerCalendar').innerHTML = cells;
 }
+function renderDatePickerMonths(){
+  const label = document.getElementById('datePickerLabel');
+  label.textContent = `${datePickerYear}`;
+  let cells = '';
+  for (let m = 0; m < 12; m++) {
+    const isSelected = datePickerMonth === m;
+    cells += `<div class="cal-cell-alt${isSelected ? ' cal-selected' : ''}" data-month="${m}">${MONTH_NAMES_SHORT[m]}</div>`;
+  }
+  document.getElementById('datePickerCalendar').innerHTML = cells;
+}
+function renderDatePickerYears(){
+  const decadeStart = Math.floor(datePickerYear / 10) * 10;
+  const label = document.getElementById('datePickerLabel');
+  label.textContent = `${decadeStart} - ${decadeStart + 9}`;
+  let cells = '';
+  // 12 celdas: un año antes de la década + los 10 de la década + uno después, para navegar sin saltos
+  for (let y = decadeStart - 1; y <= decadeStart + 10; y++) {
+    const isSelected = datePickerYear === y;
+    const isOutside = y < decadeStart || y > decadeStart + 9;
+    cells += `<div class="cal-cell-alt${isSelected ? ' cal-selected' : ''}${isOutside ? ' cal-dimmed' : ''}" data-year="${y}">${y}</div>`;
+  }
+  document.getElementById('datePickerCalendar').innerHTML = cells;
+}
+document.getElementById('datePickerLabel').addEventListener('click', () => {
+  if (datePickerLevel === 'day') datePickerLevel = 'month';
+  else if (datePickerLevel === 'month') datePickerLevel = 'year';
+  else return; // ya estamos en el nivel más alto (décadas)
+  renderDatePicker();
+});
 document.getElementById('datePickerPrevMonth').addEventListener('click', () => {
-  datePickerMonth--;
-  if (datePickerMonth < 0) { datePickerMonth = 11; datePickerYear--; }
-  renderDatePickerCalendar();
+  if (datePickerLevel === 'day') {
+    datePickerMonth--;
+    if (datePickerMonth < 0) { datePickerMonth = 11; datePickerYear--; }
+  } else if (datePickerLevel === 'month') {
+    datePickerYear--;
+  } else {
+    datePickerYear -= 10;
+  }
+  renderDatePicker();
 });
 document.getElementById('datePickerNextMonth').addEventListener('click', () => {
-  datePickerMonth++;
-  if (datePickerMonth > 11) { datePickerMonth = 0; datePickerYear++; }
-  renderDatePickerCalendar();
+  if (datePickerLevel === 'day') {
+    datePickerMonth++;
+    if (datePickerMonth > 11) { datePickerMonth = 0; datePickerYear++; }
+  } else if (datePickerLevel === 'month') {
+    datePickerYear++;
+  } else {
+    datePickerYear += 10;
+  }
+  renderDatePicker();
 });
 document.getElementById('datePickerCancel').addEventListener('click', closeDatePicker);
 document.getElementById('datePickerCalendar').addEventListener('click', (e) => {
-  const cell = e.target.closest('.cal-editable');
+  if (datePickerLevel === 'day') {
+    const cell = e.target.closest('.cal-editable');
+    if (!cell) return;
+    const cb = datePickerCallback;
+    const dateStr = cell.dataset.date;
+    closeDatePicker();
+    if (cb) cb(dateStr);
+    return;
+  }
+  const cell = e.target.closest('.cal-cell-alt');
   if (!cell) return;
-  const cb = datePickerCallback;
-  const dateStr = cell.dataset.date;
-  closeDatePicker();
-  if (cb) cb(dateStr);
+  if (datePickerLevel === 'month') {
+    datePickerMonth = Number(cell.dataset.month);
+    datePickerLevel = 'day';
+  } else {
+    datePickerYear = Number(cell.dataset.year);
+    datePickerLevel = 'month';
+  }
+  renderDatePicker();
 });
 
 /* ======================================================================
@@ -700,7 +789,7 @@ document.getElementById('btnPickStockBuyDate').addEventListener('click', () => {
     const label = document.getElementById('stockBuyDateLabel');
     label.textContent = formatDateRange(dateStr);
     label.classList.add('selected');
-  });
+  }, stockBuyDate);
 });
 document.getElementById('btnPickStockSellDate').addEventListener('click', () => {
   openDatePicker((dateStr) => {
@@ -708,7 +797,7 @@ document.getElementById('btnPickStockSellDate').addEventListener('click', () => 
     const label = document.getElementById('stockSellDateLabel');
     label.textContent = formatDateRange(dateStr);
     label.classList.add('selected');
-  });
+  }, stockSellDate);
 });
 document.getElementById('btnClearStockSellDate').addEventListener('click', () => {
   stockSellDate = null;
@@ -838,7 +927,7 @@ document.getElementById('btnPickDividendDate').addEventListener('click', () => {
     const label = document.getElementById('dividendDateLabel');
     label.textContent = formatDateRange(dateStr);
     label.classList.add('selected');
-  });
+  }, dividendDate);
 });
 document.getElementById('dividendNombreSelect').addEventListener('change', updateDividendSplitPreview);
 document.getElementById('dividendTotalInput').addEventListener('input', updateDividendSplitPreview);
@@ -929,7 +1018,7 @@ document.getElementById('btnPickExpenseDate').addEventListener('click', () => {
     const label = document.getElementById('expenseDateLabel');
     label.textContent = formatDateRange(dateStr);
     label.classList.add('selected');
-  });
+  }, expenseDate);
 });
 document.getElementById('expenseBankSelect').addEventListener('change', async (e) => { await handleBankSelectChange(e.target); await updateExpenseSplitPreview(); });
 document.getElementById('expenseAmountInput').addEventListener('input', updateExpenseSplitPreview);
