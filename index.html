@@ -114,6 +114,21 @@
     width:100%; padding:14px; border-radius:8px; border:1px solid rgba(31,182,166,0.4);
     background:var(--bg-ash-light); color:var(--text-light); font-size:15px; margin-bottom:12px;
   }
+  textarea{
+    width:100%; padding:14px; border-radius:8px; border:1px solid rgba(31,182,166,0.4);
+    background:var(--bg-ash-light); color:var(--text-light); font-size:15px; margin-bottom:12px;
+    font-family:inherit; resize:vertical;
+  }
+  .category-card{
+    display:flex; align-items:center; justify-content:space-between;
+    background:var(--bg-ash); border:1px solid rgba(31,182,166,0.3);
+    border-radius:8px; padding:14px; margin-bottom:8px; cursor:pointer;
+  }
+  .category-card .card-title{margin:0;}
+  .attachment-preview{
+    display:flex; align-items:center; gap:10px; background:var(--bg-ash-light);
+    border:1px solid rgba(31,182,166,0.3); border-radius:8px; padding:10px; margin-bottom:8px;
+  }
   select{
     width:100%; padding:14px; border-radius:8px; border:1px solid rgba(31,182,166,0.4);
     background:var(--bg-ash-light); color:var(--text-light); font-size:15px; margin-bottom:12px;
@@ -227,6 +242,7 @@
       <div class="subtitle">Acciones, dividendos y gastos, siempre a mano</div>
       <div style="width:100%; max-width:340px;">
         <button class="btn-ember" id="btnOpenStocksHub">📈 Acciones</button>
+        <button class="btn-ember" id="btnOpenInvoicesHub">🧾 Facturas</button>
         <button class="btn-outline" id="btnLockNow">🔒 Bloquear ahora</button>
         <button class="btn-outline" id="btnResetPin">🔑 Cambiar PIN / huella</button>
         <button class="btn-outline" id="btnExportBackup">⬇️ Exportar copia de seguridad</button>
@@ -400,6 +416,63 @@
     </div>
   </section>
 
+  <!-- ===================== FACTURAS: MENÚ (APARTADOS) ===================== -->
+  <section id="screen-invoices-hub" class="screen">
+    <div class="topbar">
+      <button class="icon-btn" onclick="history.back()">←</button>
+      <h1>Facturas</h1>
+    </div>
+    <div class="content">
+      <button class="btn-outline" id="btnExportInvoicesExcel">⬇️ Exportar a Excel</button>
+      <div class="section-title">Apartados</div>
+      <div id="invoiceCategoriesList"></div>
+      <button class="btn-ember" id="btnAddInvoiceCategory" style="margin-top:10px;">＋ Nuevo apartado</button>
+    </div>
+  </section>
+
+  <!-- ===================== FACTURAS: APARTADO (ALTA / LISTADO) ===================== -->
+  <section id="screen-invoice-category" class="screen">
+    <div class="topbar">
+      <button class="icon-btn" onclick="history.back()">←</button>
+      <h1 id="invoiceCategoryTitle">Apartado</h1>
+    </div>
+    <div class="content">
+      <div class="tile">
+        <label class="field-label">Concepto</label>
+        <input type="text" id="invoiceConceptoInput" placeholder="Ej. Factura de la luz">
+        <label class="field-label">Fecha</label>
+        <button class="btn-outline" id="btnPickInvoiceDate" style="margin-bottom:6px;">📅 Elegir fecha</button>
+        <div class="date-chip" id="invoiceDateLabel">Sin fecha seleccionada</div>
+        <label class="field-label">Comentarios</label>
+        <textarea id="invoiceComentariosInput" rows="3" placeholder="Notas opcionales…"></textarea>
+        <label class="field-label">Foto o PDF</label>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-outline" id="btnInvoiceTakePhoto" style="flex:1; margin-bottom:6px;">📷 Hacer foto</button>
+          <button class="btn-outline" id="btnInvoiceChooseFile" style="flex:1; margin-bottom:6px;">📎 Elegir archivo</button>
+        </div>
+        <input type="file" id="invoiceCameraInput" accept="image/*" capture="environment" style="display:none;">
+        <input type="file" id="invoiceFileInput" accept="image/*,application/pdf" style="display:none;">
+        <div id="invoiceAttachmentPreview" style="margin-bottom:8px;"></div>
+        <button class="btn-ember" id="btnSaveInvoice" style="margin-top:4px;">＋ Añadir factura</button>
+        <button class="btn-outline" id="btnCancelInvoiceEdit" style="display:none; margin-top:8px; margin-bottom:0;">Cancelar edición</button>
+      </div>
+      <div class="section-title">Historial de facturas</div>
+      <div id="invoicesList"></div>
+    </div>
+  </section>
+
+  <!-- ===================== NUEVO APARTADO DE FACTURAS ===================== -->
+  <div id="addCategoryModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <div class="card-title" style="text-align:center; margin-bottom:6px;">Nuevo apartado</div>
+      <label class="field-label">Nombre</label>
+      <input type="text" id="newCategoryNameInput" placeholder="Ej. Salud">
+      <div class="help-text" id="newCategoryError" style="color:var(--state-error);"></div>
+      <button class="btn-ember" id="btnSaveNewCategory">Crear apartado</button>
+      <button class="btn-outline" id="btnCancelNewCategory" style="margin-top:0;">Cancelar</button>
+    </div>
+  </div>
+
   <!-- ===================== RESULTADOS ===================== -->
   <section id="screen-stock-results" class="screen">
     <div class="topbar">
@@ -425,10 +498,10 @@
 /* ---------- IndexedDB helpers ---------- */
 function openDb(){
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('finanzas_db', 1);
+    const req = indexedDB.open('finanzas_db', 2);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      const stores = ['stockEntries', 'stockDividends', 'stockExpenses', 'stockBanks'];
+      const stores = ['stockEntries', 'stockDividends', 'stockExpenses', 'stockBanks', 'invoiceCategories', 'invoiceEntries'];
       stores.forEach(name => {
         if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
       });
@@ -508,6 +581,8 @@ function go(view){
   if (view === 'dividends') renderDividendsScreen();
   if (view === 'expenses') renderExpensesScreen();
   if (view === 'stock-results') renderStockResultsScreen();
+  if (view === 'invoices-hub') renderInvoicesHubScreen();
+  if (view === 'invoice-category') renderInvoiceCategoryScreen();
 }
 window.addEventListener('popstate', (e) => {
   const state = e.state || { view: 'welcome' };
@@ -517,6 +592,8 @@ window.addEventListener('popstate', (e) => {
   if (state.view === 'dividends') renderDividendsScreen();
   if (state.view === 'expenses') renderExpensesScreen();
   if (state.view === 'stock-results') renderStockResultsScreen();
+  if (state.view === 'invoices-hub') renderInvoicesHubScreen();
+  if (state.view === 'invoice-category') renderInvoiceCategoryScreen();
 });
 
 /* ---------- selector de fecha reutilizable (calendario en modal, con niveles día/mes/año) ---------- */
@@ -1195,6 +1272,7 @@ async function renderStockResultsScreen(){
 
 /* ---------- navegación del menú Acciones ---------- */
 document.getElementById('btnOpenStocksHub').addEventListener('click', () => go('stocks-hub'));
+document.getElementById('btnOpenInvoicesHub').addEventListener('click', () => go('invoices-hub'));
 document.getElementById('btnOpenStockForm').addEventListener('click', async () => { resetStockForm(); await prepareStockForm(); go('stock-form'); });
 document.getElementById('btnOpenStocksList').addEventListener('click', () => go('stocks-list'));
 document.getElementById('btnOpenStocksSold').addEventListener('click', () => go('stocks-sold'));
@@ -1379,7 +1457,7 @@ document.addEventListener('visibilitychange', () => {
    que se puede llevar a cualquier otro dispositivo/instalación de esta
    misma app; solo se puede abrir sabiendo la contraseña usada al exportar.
 ====================================================================== */
-const BACKUP_STORES = ['stockEntries', 'stockDividends', 'stockExpenses', 'stockBanks'];
+const BACKUP_STORES = ['stockEntries', 'stockDividends', 'stockExpenses', 'stockBanks', 'invoiceCategories', 'invoiceEntries'];
 
 function bufferToBase64(buf){
   let binary = '';
@@ -1524,7 +1602,7 @@ document.getElementById('btnBackupModalConfirm').addEventListener('click', async
       const data = await decryptBackupFile(fileText, password);
       const counts = await restoreBackupData(data);
       closeBackupModal();
-      alert(`Copia de seguridad importada: ${counts.stockEntries} acciones, ${counts.stockDividends} dividendos, ${counts.stockExpenses} gastos.`);
+      alert(`Copia de seguridad importada: ${counts.stockEntries} acciones, ${counts.stockDividends} dividendos, ${counts.stockExpenses} gastos, ${counts.invoiceEntries} facturas.`);
       if (document.getElementById('screen-welcome').classList.contains('active')) {
         // nada más que hacer aquí; las pantallas se recalculan al entrar en ellas
       }
@@ -1533,6 +1611,264 @@ document.getElementById('btnBackupModalConfirm').addEventListener('click', async
     } finally {
       btn.disabled = false; btn.textContent = originalLabel;
     }
+  }
+});
+
+/* ======================================================================
+   FACTURAS: apartados personalizables (Casa, Coche, Ocio, ...) con facturas
+   dentro (concepto, fecha, comentarios y foto/PDF adjunto), más exportación
+   a Excel de todo el listado.
+====================================================================== */
+let currentInvoiceCategoryId = null;
+
+async function ensureDefaultInvoiceCategories(){
+  const existing = await dbGetAll('invoiceCategories');
+  if (existing.length > 0) return;
+  const defaults = ['Casa', 'Coche', 'Ocio'];
+  for (let i = 0; i < defaults.length; i++) {
+    await dbPut('invoiceCategories', { id: uuid(), name: defaults[i], createdAt: Date.now() + i });
+  }
+}
+
+async function renderInvoicesHubScreen(){
+  await ensureDefaultInvoiceCategories();
+  const [categories, invoices] = await Promise.all([dbGetAll('invoiceCategories'), dbGetAll('invoiceEntries')]);
+  categories.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const counts = {};
+  invoices.forEach(inv => { counts[inv.categoryId] = (counts[inv.categoryId] || 0) + 1; });
+  document.getElementById('invoiceCategoriesList').innerHTML = categories.map(cat => `
+    <div class="category-card" data-action="open-category" data-id="${cat.id}">
+      <div>
+        <div class="card-title">${escapeHtml(cat.name)}</div>
+        <div class="card-muted">${counts[cat.id] || 0} factura${(counts[cat.id] || 0) === 1 ? '' : 's'}</div>
+      </div>
+      <button class="icon-btn danger" data-action="delete-category" data-id="${cat.id}">✕</button>
+    </div>
+  `).join('') || '<p class="help-text">Sin apartados todavía.</p>';
+}
+document.getElementById('invoiceCategoriesList').addEventListener('click', async (e) => {
+  const delBtn = e.target.closest('[data-action="delete-category"]');
+  if (delBtn) {
+    const catId = delBtn.dataset.id;
+    const invoicesInCat = (await dbGetAll('invoiceEntries')).filter(inv => inv.categoryId === catId);
+    const msg = invoicesInCat.length > 0
+      ? `Este apartado tiene ${invoicesInCat.length} factura(s). ¿Eliminar el apartado y todas sus facturas?`
+      : '¿Eliminar este apartado?';
+    if (!confirm(msg)) return;
+    for (const inv of invoicesInCat) await dbDelete('invoiceEntries', inv.id);
+    await dbDelete('invoiceCategories', catId);
+    await renderInvoicesHubScreen();
+    return;
+  }
+  const openBtn = e.target.closest('[data-action="open-category"]');
+  if (openBtn) {
+    currentInvoiceCategoryId = openBtn.dataset.id;
+    go('invoice-category');
+  }
+});
+document.getElementById('btnAddInvoiceCategory').addEventListener('click', () => {
+  document.getElementById('newCategoryNameInput').value = '';
+  document.getElementById('newCategoryError').textContent = '';
+  document.getElementById('addCategoryModal').style.display = 'flex';
+});
+document.getElementById('btnCancelNewCategory').addEventListener('click', () => {
+  document.getElementById('addCategoryModal').style.display = 'none';
+});
+document.getElementById('btnSaveNewCategory').addEventListener('click', async () => {
+  const name = document.getElementById('newCategoryNameInput').value.trim();
+  if (!name) { document.getElementById('newCategoryError').textContent = 'Escribe un nombre para el apartado.'; return; }
+  await dbPut('invoiceCategories', { id: uuid(), name, createdAt: Date.now() });
+  document.getElementById('addCategoryModal').style.display = 'none';
+  await renderInvoicesHubScreen();
+});
+
+/* ---------- formulario de factura (alta / edición) ---------- */
+let invoiceDate = null, editingInvoiceId = null, invoiceAttachment = null; // {dataUrl, fileName, fileType}
+function resetInvoiceForm(){
+  editingInvoiceId = null;
+  invoiceDate = null;
+  invoiceAttachment = null;
+  document.getElementById('invoiceConceptoInput').value = '';
+  document.getElementById('invoiceComentariosInput').value = '';
+  const label = document.getElementById('invoiceDateLabel');
+  label.textContent = 'Sin fecha seleccionada'; label.classList.remove('selected');
+  document.getElementById('invoiceCameraInput').value = '';
+  document.getElementById('invoiceFileInput').value = '';
+  renderInvoiceAttachmentPreview();
+  document.getElementById('btnSaveInvoice').textContent = '＋ Añadir factura';
+  document.getElementById('btnCancelInvoiceEdit').style.display = 'none';
+}
+function renderInvoiceAttachmentPreview(){
+  const box = document.getElementById('invoiceAttachmentPreview');
+  if (!invoiceAttachment) { box.innerHTML = ''; return; }
+  const isImage = (invoiceAttachment.fileType || '').startsWith('image/');
+  box.innerHTML = `
+    <div class="attachment-preview">
+      ${isImage
+        ? `<img src="${invoiceAttachment.dataUrl}" style="width:56px; height:56px; object-fit:cover; border-radius:6px;">`
+        : `<span style="font-size:28px;">📄</span>`}
+      <div style="flex:1; overflow:hidden;">
+        <div class="card-title" style="font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(invoiceAttachment.fileName || 'Adjunto')}</div>
+        <a href="${invoiceAttachment.dataUrl}" target="_blank" rel="noopener" class="card-muted" style="text-decoration:underline;">Ver</a>
+      </div>
+      <button class="icon-btn danger" id="btnRemoveInvoiceAttachment">✕</button>
+    </div>
+  `;
+  document.getElementById('btnRemoveInvoiceAttachment').addEventListener('click', () => {
+    invoiceAttachment = null;
+    renderInvoiceAttachmentPreview();
+  });
+}
+function readFileAsInvoiceAttachment(file){
+  if (!file) return;
+  const MAX_BYTES = 15 * 1024 * 1024; // 15 MB
+  if (file.size > MAX_BYTES) { alert('El archivo es demasiado grande (máx. 15 MB).'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    invoiceAttachment = { dataUrl: reader.result, fileName: file.name, fileType: file.type };
+    renderInvoiceAttachmentPreview();
+  };
+  reader.onerror = () => alert('No se pudo leer el archivo.');
+  reader.readAsDataURL(file);
+}
+document.getElementById('btnInvoiceTakePhoto').addEventListener('click', () => document.getElementById('invoiceCameraInput').click());
+document.getElementById('btnInvoiceChooseFile').addEventListener('click', () => document.getElementById('invoiceFileInput').click());
+document.getElementById('invoiceCameraInput').addEventListener('change', (e) => readFileAsInvoiceAttachment(e.target.files && e.target.files[0]));
+document.getElementById('invoiceFileInput').addEventListener('change', (e) => readFileAsInvoiceAttachment(e.target.files && e.target.files[0]));
+document.getElementById('btnPickInvoiceDate').addEventListener('click', () => {
+  openDatePicker((dateStr) => {
+    invoiceDate = dateStr;
+    const label = document.getElementById('invoiceDateLabel');
+    label.textContent = formatDateRange(dateStr);
+    label.classList.add('selected');
+  }, invoiceDate);
+});
+document.getElementById('btnCancelInvoiceEdit').addEventListener('click', resetInvoiceForm);
+
+async function renderInvoiceCategoryScreen(){
+  if (!currentInvoiceCategoryId) { go('invoices-hub'); return; }
+  const cat = await dbGet('invoiceCategories', currentInvoiceCategoryId);
+  if (!cat) { go('invoices-hub'); return; }
+  document.getElementById('invoiceCategoryTitle').textContent = cat.name;
+  resetInvoiceForm();
+  await renderInvoicesListScreen();
+}
+async function renderInvoicesListScreen(){
+  const all = (await dbGetAll('invoiceEntries'))
+    .filter(inv => inv.categoryId === currentInvoiceCategoryId)
+    .sort((a, b) => (b.dateStr || '').localeCompare(a.dateStr || ''));
+  document.getElementById('invoicesList').innerHTML = all.map(inv => {
+    const isImage = (inv.fileType || '').startsWith('image/');
+    const attachmentHtml = inv.fileDataUrl
+      ? `<a href="${inv.fileDataUrl}" target="_blank" rel="noopener" style="display:flex; align-items:center; gap:6px; margin-top:6px; text-decoration:underline; color:var(--accent-teal);">
+           ${isImage ? `<img src="${inv.fileDataUrl}" style="width:32px; height:32px; object-fit:cover; border-radius:4px;">` : '📄'} ${escapeHtml(inv.fileName || 'Ver adjunto')}
+         </a>`
+      : '';
+    return `
+      <div class="card">
+        <button class="icon-btn" data-action="edit-invoice" data-id="${inv.id}" style="position:absolute; top:4px; right:34px;">✏️</button>
+        <button class="icon-btn danger" data-action="delete-invoice" data-id="${inv.id}">✕</button>
+        <div class="card-title">${escapeHtml(inv.concepto)}</div>
+        <div class="card-muted">${formatDateRange(inv.dateStr)}</div>
+        ${inv.comentarios ? `<div class="card-muted">${escapeHtml(inv.comentarios)}</div>` : ''}
+        ${attachmentHtml}
+      </div>
+    `;
+  }).join('') || '<p class="help-text">Sin facturas registradas en este apartado todavía.</p>';
+}
+document.getElementById('btnSaveInvoice').addEventListener('click', async () => {
+  const concepto = document.getElementById('invoiceConceptoInput').value.trim();
+  const comentarios = document.getElementById('invoiceComentariosInput').value.trim();
+  if (!concepto) { alert('Indica el concepto de la factura.'); return; }
+  if (!invoiceDate) { alert('Elige la fecha de la factura.'); return; }
+  const record = {
+    id: editingInvoiceId || uuid(),
+    categoryId: currentInvoiceCategoryId,
+    concepto,
+    dateStr: invoiceDate,
+    comentarios,
+    fileDataUrl: invoiceAttachment ? invoiceAttachment.dataUrl : null,
+    fileName: invoiceAttachment ? invoiceAttachment.fileName : null,
+    fileType: invoiceAttachment ? invoiceAttachment.fileType : null,
+    createdAt: Date.now()
+  };
+  if (editingInvoiceId) {
+    const existing = await dbGet('invoiceEntries', editingInvoiceId);
+    if (existing && existing.createdAt) record.createdAt = existing.createdAt;
+  }
+  await dbPut('invoiceEntries', record);
+  resetInvoiceForm();
+  await renderInvoicesListScreen();
+});
+document.getElementById('invoicesList').addEventListener('click', async (e) => {
+  const editBtn = e.target.closest('[data-action="edit-invoice"]');
+  if (editBtn) {
+    const inv = await dbGet('invoiceEntries', editBtn.dataset.id);
+    if (!inv) return;
+    editingInvoiceId = inv.id;
+    invoiceDate = inv.dateStr;
+    document.getElementById('invoiceConceptoInput').value = inv.concepto || '';
+    document.getElementById('invoiceComentariosInput').value = inv.comentarios || '';
+    const label = document.getElementById('invoiceDateLabel');
+    label.textContent = formatDateRange(inv.dateStr); label.classList.add('selected');
+    invoiceAttachment = inv.fileDataUrl ? { dataUrl: inv.fileDataUrl, fileName: inv.fileName, fileType: inv.fileType } : null;
+    renderInvoiceAttachmentPreview();
+    document.getElementById('btnSaveInvoice').textContent = '💾 Guardar cambios';
+    document.getElementById('btnCancelInvoiceEdit').style.display = 'block';
+    document.querySelector('#screen-invoice-category .content').scrollTop = 0;
+    return;
+  }
+  const delBtn = e.target.closest('[data-action="delete-invoice"]');
+  if (delBtn && confirm('¿Eliminar esta factura?')) {
+    await dbDelete('invoiceEntries', delBtn.dataset.id);
+    if (editingInvoiceId === delBtn.dataset.id) resetInvoiceForm();
+    await renderInvoicesListScreen();
+  }
+});
+
+/* ---------- exportar todas las facturas a Excel ---------- */
+let _xlsxLoadPromise = null;
+function loadXlsxLib(){
+  if (window.XLSX) return Promise.resolve();
+  if (_xlsxLoadPromise) return _xlsxLoadPromise;
+  _xlsxLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('No se pudo cargar la librería de Excel. Comprueba tu conexión a internet e inténtalo de nuevo.'));
+    document.head.appendChild(script);
+  });
+  return _xlsxLoadPromise;
+}
+document.getElementById('btnExportInvoicesExcel').addEventListener('click', async () => {
+  const btn = document.getElementById('btnExportInvoicesExcel');
+  const originalLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Preparando…';
+  try {
+    await loadXlsxLib();
+    const [categories, invoices] = await Promise.all([dbGetAll('invoiceCategories'), dbGetAll('invoiceEntries')]);
+    if (invoices.length === 0) { alert('Todavía no hay facturas registradas para exportar.'); return; }
+    const catMap = {};
+    categories.forEach(c => { catMap[c.id] = c.name; });
+    const rows = invoices
+      .sort((a, b) => (a.dateStr || '').localeCompare(b.dateStr || ''))
+      .map(inv => ({
+        'Apartado': catMap[inv.categoryId] || '—',
+        'Concepto': inv.concepto || '',
+        'Fecha': inv.dateStr ? formatDateRange(inv.dateStr) : '',
+        'Comentarios': inv.comentarios || '',
+        'Archivo adjunto': inv.fileName || 'Sin adjunto'
+      }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 12 }, { wch: 40 }, { wch: 24 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Facturas');
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `facturas_${dateStr}.xlsx`);
+  } catch (e) {
+    alert(e.message || 'No se pudo exportar a Excel.');
+  } finally {
+    btn.disabled = false; btn.textContent = originalLabel;
   }
 });
 
