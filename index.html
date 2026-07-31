@@ -239,6 +239,19 @@
     </div>
   </section>
 
+  <!-- ===================== MODIFICAR CERRADOS (dividendo manual para acciones ya vendidas) ===================== -->
+  <div id="closedAllocModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <div class="card-title" style="text-align:center; margin-bottom:6px;">Dividendo en acciones cerradas</div>
+      <p class="help-text">
+        El reparto automático solo incluye acciones activas. Aquí puedes añadir o modificar a mano cuánto de este dividendo corresponde a acciones ya vendidas del mismo valor.
+      </p>
+      <div id="closedAllocList"></div>
+      <button class="btn-ember" id="btnSaveClosedAlloc">Guardar</button>
+      <button class="btn-outline" id="btnCancelClosedAlloc" style="margin-top:0;">Cancelar</button>
+    </div>
+  </div>
+
   <!-- ===================== COPIA DE SEGURIDAD (exportar / importar, cifrado con contraseña) ===================== -->
   <div id="backupModal" class="modal-overlay" style="display:none;">
     <div class="modal-box">
@@ -353,6 +366,8 @@
         <label class="field-label">Acción asociada</label>
         <select id="dividendNombreSelect"></select>
         <div class="help-text" id="dividendSplitPreview" style="margin:6px 0 4px;"></div>
+        <button class="btn-outline" id="btnModifyClosedDividend" style="margin-top:4px;">🔒 Modificar cerrados</button>
+        <div class="help-text" id="dividendClosedPreview" style="margin:2px 0 4px;"></div>
         <button class="btn-ember" id="btnSaveDividend" style="margin-top:4px;">＋ Añadir dividendo</button>
         <button class="btn-outline" id="btnCancelDividendEdit" style="display:none; margin-top:8px; margin-bottom:0;">Cancelar edición</button>
       </div>
@@ -702,7 +717,8 @@ function allocationPreviewHtml(lots, totalShares, allocations){
 async function computeStockDerived(stock, allDividends, allExpenses){
   const dividendTotal = round2(allDividends.reduce((sum, d) => {
     const alloc = (d.allocations || []).find(a => a.stockId === stock.id);
-    return sum + (alloc ? alloc.amount : 0);
+    const closedAlloc = (d.closedAllocations || []).find(a => a.stockId === stock.id);
+    return sum + (alloc ? alloc.amount : 0) + (closedAlloc ? closedAlloc.amount : 0);
   }, 0));
   const expenseTotal = round2(allExpenses.reduce((sum, e) => {
     const alloc = (e.allocations || []).find(a => a.stockId === stock.id);
@@ -905,16 +921,65 @@ document.getElementById('stocksSoldList').addEventListener('click', async (e) =>
 
 /* ---------- dividendos ---------- */
 let dividendDate = null, editingDividendId = null;
+let dividendClosedAllocations = {}; // { stockId: { amount, nombre, numAcciones } } — reparto manual en acciones ya vendidas
 function resetDividendForm(){
   editingDividendId = null;
   dividendDate = null;
+  dividendClosedAllocations = {};
   document.getElementById('dividendTotalInput').value = '';
   const label = document.getElementById('dividendDateLabel');
   label.textContent = 'Sin fecha seleccionada'; label.classList.remove('selected');
   document.getElementById('dividendSplitPreview').innerHTML = '';
+  document.getElementById('dividendClosedPreview').textContent = '';
   document.getElementById('btnSaveDividend').textContent = '＋ Añadir dividendo';
   document.getElementById('btnCancelDividendEdit').style.display = 'none';
 }
+async function openClosedAllocModal(){
+  const all = await dbGetAll('stockEntries');
+  const sold = all.filter(s => s.fechaVenta).sort((a, b) => (b.fechaVenta || '').localeCompare(a.fechaVenta || ''));
+  const listEl = document.getElementById('closedAllocList');
+  if (sold.length === 0) {
+    listEl.innerHTML = '<p class="help-text">No tienes acciones cerradas (vendidas) todavía.</p>';
+  } else {
+    listEl.innerHTML = sold.map(s => {
+      const existing = dividendClosedAllocations[s.id];
+      const val = existing ? existing.amount : '';
+      return `
+        <div style="margin-bottom:10px;">
+          <label class="field-label">${escapeHtml(s.nombre)} — ${s.numAcciones} acc. (vendida ${formatDateRange(s.fechaVenta)})</label>
+          <input type="number" min="0" step="0.01" placeholder="0.00" data-stock-id="${s.id}" data-nombre="${escapeHtml(s.nombre)}" data-num-acciones="${s.numAcciones}" value="${val}">
+        </div>
+      `;
+    }).join('');
+  }
+  document.getElementById('closedAllocModal').style.display = 'flex';
+}
+function closeClosedAllocModal(){
+  document.getElementById('closedAllocModal').style.display = 'none';
+}
+function updateDividendClosedPreview(){
+  const entries = Object.values(dividendClosedAllocations);
+  const preview = document.getElementById('dividendClosedPreview');
+  if (entries.length === 0) { preview.textContent = ''; return; }
+  const total = entries.reduce((sum, e) => sum + e.amount, 0);
+  preview.textContent = '🔒 ' + entries.map(e => `${e.nombre} (${e.numAcciones} acc.) → ${e.amount.toFixed(2)}€`).join(' · ') + ` — total cerrados: ${round2(total).toFixed(2)}€`;
+}
+document.getElementById('btnModifyClosedDividend').addEventListener('click', openClosedAllocModal);
+document.getElementById('btnCancelClosedAlloc').addEventListener('click', closeClosedAllocModal);
+document.getElementById('btnSaveClosedAlloc').addEventListener('click', () => {
+  const inputs = document.querySelectorAll('#closedAllocList input[data-stock-id]');
+  inputs.forEach(input => {
+    const stockId = input.dataset.stockId;
+    const amount = parseFloat(input.value);
+    if (amount > 0) {
+      dividendClosedAllocations[stockId] = { amount: round2(amount), nombre: input.dataset.nombre, numAcciones: Number(input.dataset.numAcciones) };
+    } else {
+      delete dividendClosedAllocations[stockId];
+    }
+  });
+  updateDividendClosedPreview();
+  closeClosedAllocModal();
+});
 async function refreshDividendNombreSelect(selectedValue){
   const names = await getActiveStockNamesDistinct();
   const select = document.getElementById('dividendNombreSelect');
@@ -939,6 +1004,7 @@ async function renderDividendsScreen(){
       <div class="card-title">${escapeHtml(d.nombreAccion)} — ${d.totalDividendo.toFixed(2)} €</div>
       <div class="card-muted">${formatDateRange(d.dateStr)}</div>
       <div class="card-muted">${(d.allocations || []).map(a => `${a.numAcciones} acc. → ${a.amount.toFixed(2)}€`).join(' · ') || 'Sin reparto (no había acciones activas de este nombre)'}</div>
+      ${(d.closedAllocations && d.closedAllocations.length) ? `<div class="card-muted">🔒 Cerrados: ${d.closedAllocations.map(a => `${escapeHtml(a.nombre)} (${a.numAcciones} acc.) → ${a.amount.toFixed(2)}€`).join(' · ')}</div>` : ''}
     </div>
   `).join('') || '<p class="help-text">Sin dividendos registrados todavía.</p>';
 }
@@ -960,12 +1026,14 @@ document.getElementById('btnSaveDividend').addEventListener('click', async () =>
   if (!dividendDate) { alert('Elige la fecha del dividendo.'); return; }
   if (!nombre) { alert('Elige la acción asociada.'); return; }
   const { allocations } = await computeAllocationForActiveLots(s => s.nombre === nombre, total);
+  const closedAllocations = Object.entries(dividendClosedAllocations).map(([stockId, a]) => ({ stockId, amount: a.amount, nombre: a.nombre, numAcciones: a.numAcciones }));
   const record = {
     id: editingDividendId || uuid(),
     nombreAccion: nombre,
     totalDividendo: total,
     dateStr: dividendDate,
     allocations,
+    closedAllocations,
     createdAt: Date.now()
   };
   if (editingDividendId) {
@@ -986,6 +1054,9 @@ document.getElementById('dividendsList').addEventListener('click', async (e) => 
     document.getElementById('dividendTotalInput').value = d.totalDividendo;
     const label = document.getElementById('dividendDateLabel');
     label.textContent = formatDateRange(d.dateStr); label.classList.add('selected');
+    dividendClosedAllocations = {};
+    (d.closedAllocations || []).forEach(a => { dividendClosedAllocations[a.stockId] = { amount: a.amount, nombre: a.nombre, numAcciones: a.numAcciones }; });
+    updateDividendClosedPreview();
     await refreshDividendNombreSelect(d.nombreAccion);
     document.getElementById('btnSaveDividend').textContent = '💾 Guardar cambios';
     document.getElementById('btnCancelDividendEdit').style.display = 'block';
