@@ -463,6 +463,8 @@
         <input type="text" id="invoiceConceptoInput" placeholder="Ej. Factura de la luz">
         <label class="field-label">Precio (€)</label>
         <input type="number" id="invoicePrecioInput" min="0" step="0.01" placeholder="Ej. 45.90">
+        <label class="field-label">Apartado</label>
+        <select id="invoiceCategorySelect"></select>
         <label class="field-label">Fecha</label>
         <button class="btn-outline" id="btnPickInvoiceDate" style="margin-bottom:6px;">📅 Elegir fecha</button>
         <div class="date-chip" id="invoiceDateLabel">Sin fecha seleccionada</div>
@@ -1770,13 +1772,20 @@ document.getElementById('btnCloseAttachmentViewer').addEventListener('click', cl
 
 /* ---------- formulario de factura (alta / edición) ---------- */
 let invoiceDate = null, editingInvoiceId = null, invoiceAttachment = null; // {dataUrl, fileName, fileType}
-function resetInvoiceForm(){
+async function refreshInvoiceCategorySelect(selectedId){
+  const categories = (await dbGetAll('invoiceCategories')).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const sel = document.getElementById('invoiceCategorySelect');
+  sel.innerHTML = categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  sel.value = selectedId || currentInvoiceCategoryId;
+}
+async function resetInvoiceForm(){
   editingInvoiceId = null;
   invoiceDate = null;
   invoiceAttachment = null;
   document.getElementById('invoiceConceptoInput').value = '';
   document.getElementById('invoicePrecioInput').value = '';
   document.getElementById('invoiceComentariosInput').value = '';
+  await refreshInvoiceCategorySelect(currentInvoiceCategoryId);
   const label = document.getElementById('invoiceDateLabel');
   label.textContent = 'Sin fecha seleccionada'; label.classList.remove('selected');
   document.getElementById('invoiceCameraInput').value = '';
@@ -1847,7 +1856,7 @@ async function renderInvoiceCategoryScreen(){
     ? `${invoices.length} factura${invoices.length === 1 ? '' : 's'} · ${round2(total).toFixed(2)} € en total`
     : 'Sin facturas todavía en este apartado.';
 }
-document.getElementById('btnOpenInvoiceForm').addEventListener('click', () => { resetInvoiceForm(); go('invoice-form'); });
+document.getElementById('btnOpenInvoiceForm').addEventListener('click', async () => { await resetInvoiceForm(); go('invoice-form'); });
 document.getElementById('btnOpenInvoicesList').addEventListener('click', () => go('invoice-list'));
 document.getElementById('btnOpenInvoiceStats').addEventListener('click', () => go('invoice-stats'));
 
@@ -1889,11 +1898,13 @@ document.getElementById('btnSaveInvoice').addEventListener('click', async () => 
   const comentarios = document.getElementById('invoiceComentariosInput').value.trim();
   const precioRaw = document.getElementById('invoicePrecioInput').value;
   const precio = precioRaw !== '' ? round2(parseFloat(precioRaw)) : null;
+  const categoryId = document.getElementById('invoiceCategorySelect').value;
   if (!concepto) { alert('Indica el concepto de la factura.'); return; }
   if (!invoiceDate) { alert('Elige la fecha de la factura.'); return; }
+  if (!categoryId) { alert('Elige un apartado.'); return; }
   const record = {
     id: editingInvoiceId || uuid(),
-    categoryId: currentInvoiceCategoryId,
+    categoryId,
     concepto,
     precio,
     dateStr: invoiceDate,
@@ -1908,7 +1919,8 @@ document.getElementById('btnSaveInvoice').addEventListener('click', async () => 
     if (existing && existing.createdAt) record.createdAt = existing.createdAt;
   }
   await dbPut('invoiceEntries', record);
-  resetInvoiceForm();
+  await resetInvoiceForm();
+  currentInvoiceCategoryId = categoryId;
   go('invoice-list');
 });
 document.getElementById('invoicesList').addEventListener('click', async (e) => {
@@ -1931,6 +1943,7 @@ document.getElementById('invoicesList').addEventListener('click', async (e) => {
     label.textContent = formatDateRange(inv.dateStr); label.classList.add('selected');
     invoiceAttachment = inv.fileDataUrl ? { dataUrl: inv.fileDataUrl, fileName: inv.fileName, fileType: inv.fileType } : null;
     renderInvoiceAttachmentPreview();
+    await refreshInvoiceCategorySelect(inv.categoryId);
     document.getElementById('invoiceFormTitle').textContent = 'Editar factura';
     document.getElementById('btnSaveInvoice').textContent = '💾 Guardar cambios';
     document.getElementById('btnCancelInvoiceEdit').style.display = 'block';
