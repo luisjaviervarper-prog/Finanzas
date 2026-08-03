@@ -129,6 +129,13 @@
     display:flex; align-items:center; gap:10px; background:var(--bg-ash-light);
     border:1px solid rgba(31,182,166,0.3); border-radius:8px; padding:10px; margin-bottom:8px;
   }
+  .invoice-summary{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    cursor:pointer; padding:2px 0;
+  }
+  .invoice-summary-text{font-size:14.5px; color:var(--text-light); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .invoice-caret{color:var(--text-muted); font-size:12px; flex-shrink:0;}
+  .invoice-details{margin-top:10px; padding-top:10px; border-top:1px solid rgba(31,182,166,0.25); display:none;}
   select{
     width:100%; padding:14px; border-radius:8px; border:1px solid rgba(31,182,166,0.4);
     background:var(--bg-ash-light); color:var(--text-light); font-size:15px; margin-bottom:12px;
@@ -430,11 +437,25 @@
     </div>
   </section>
 
-  <!-- ===================== FACTURAS: APARTADO (ALTA / LISTADO) ===================== -->
+  <!-- ===================== FACTURAS: APARTADO (MENÚ) ===================== -->
   <section id="screen-invoice-category" class="screen">
     <div class="topbar">
       <button class="icon-btn" onclick="history.back()">←</button>
       <h1 id="invoiceCategoryTitle">Apartado</h1>
+    </div>
+    <div class="content">
+      <div class="help-text" id="invoiceCategorySummary" style="margin-bottom:10px;"></div>
+      <button class="btn-ember" id="btnOpenInvoiceForm">➕ Nueva factura</button>
+      <button class="btn-ember" id="btnOpenInvoicesList">📋 Facturas</button>
+      <button class="btn-ember" id="btnOpenInvoiceStats">📊 Estadísticas</button>
+    </div>
+  </section>
+
+  <!-- ===================== FACTURAS: FICHA (ALTA / EDICIÓN) ===================== -->
+  <section id="screen-invoice-form" class="screen">
+    <div class="topbar">
+      <button class="icon-btn" onclick="history.back()">←</button>
+      <h1 id="invoiceFormTitle">Nueva factura</h1>
     </div>
     <div class="content">
       <div class="tile">
@@ -458,9 +479,27 @@
         <button class="btn-ember" id="btnSaveInvoice" style="margin-top:4px;">＋ Añadir factura</button>
         <button class="btn-outline" id="btnCancelInvoiceEdit" style="display:none; margin-top:8px; margin-bottom:0;">Cancelar edición</button>
       </div>
-      <div class="section-title">Historial de facturas</div>
+    </div>
+  </section>
+
+  <!-- ===================== FACTURAS: LISTADO (ACORDEÓN) ===================== -->
+  <section id="screen-invoice-list" class="screen">
+    <div class="topbar">
+      <button class="icon-btn" onclick="history.back()">←</button>
+      <h1 id="invoiceListTitle">Facturas</h1>
+    </div>
+    <div class="content">
       <div id="invoicesList"></div>
     </div>
+  </section>
+
+  <!-- ===================== FACTURAS: ESTADÍSTICAS ===================== -->
+  <section id="screen-invoice-stats" class="screen">
+    <div class="topbar">
+      <button class="icon-btn" onclick="history.back()">←</button>
+      <h1 id="invoiceStatsTitle">Estadísticas</h1>
+    </div>
+    <div class="content" id="invoiceStatsContent"></div>
   </section>
 
   <!-- ===================== VISOR DE ADJUNTOS (foto / PDF) ===================== -->
@@ -597,6 +636,8 @@ function go(view){
   if (view === 'stock-results') renderStockResultsScreen();
   if (view === 'invoices-hub') renderInvoicesHubScreen();
   if (view === 'invoice-category') renderInvoiceCategoryScreen();
+  if (view === 'invoice-list') renderInvoicesListScreen();
+  if (view === 'invoice-stats') renderInvoiceStatsScreen();
 }
 window.addEventListener('popstate', (e) => {
   const state = e.state || { view: 'welcome' };
@@ -608,6 +649,8 @@ window.addEventListener('popstate', (e) => {
   if (state.view === 'stock-results') renderStockResultsScreen();
   if (state.view === 'invoices-hub') renderInvoicesHubScreen();
   if (state.view === 'invoice-category') renderInvoiceCategoryScreen();
+  if (state.view === 'invoice-list') renderInvoicesListScreen();
+  if (state.view === 'invoice-stats') renderInvoiceStatsScreen();
 });
 
 /* ---------- selector de fecha reutilizable (calendario en modal, con niveles día/mes/año) ---------- */
@@ -1739,6 +1782,7 @@ function resetInvoiceForm(){
   document.getElementById('invoiceCameraInput').value = '';
   document.getElementById('invoiceFileInput').value = '';
   renderInvoiceAttachmentPreview();
+  document.getElementById('invoiceFormTitle').textContent = 'Nueva factura';
   document.getElementById('btnSaveInvoice').textContent = '＋ Añadir factura';
   document.getElementById('btnCancelInvoiceEdit').style.display = 'none';
 }
@@ -1797,10 +1841,20 @@ async function renderInvoiceCategoryScreen(){
   const cat = await dbGet('invoiceCategories', currentInvoiceCategoryId);
   if (!cat) { go('invoices-hub'); return; }
   document.getElementById('invoiceCategoryTitle').textContent = cat.name;
-  resetInvoiceForm();
-  await renderInvoicesListScreen();
+  const invoices = (await dbGetAll('invoiceEntries')).filter(inv => inv.categoryId === currentInvoiceCategoryId);
+  const total = invoices.reduce((sum, inv) => sum + (inv.precio || 0), 0);
+  document.getElementById('invoiceCategorySummary').textContent = invoices.length
+    ? `${invoices.length} factura${invoices.length === 1 ? '' : 's'} · ${round2(total).toFixed(2)} € en total`
+    : 'Sin facturas todavía en este apartado.';
 }
+document.getElementById('btnOpenInvoiceForm').addEventListener('click', () => { resetInvoiceForm(); go('invoice-form'); });
+document.getElementById('btnOpenInvoicesList').addEventListener('click', () => go('invoice-list'));
+document.getElementById('btnOpenInvoiceStats').addEventListener('click', () => go('invoice-stats'));
+
+/* ---------- listado de facturas (acordeón: resumen compacto, se despliega al tocar) ---------- */
 async function renderInvoicesListScreen(){
+  const cat = await dbGet('invoiceCategories', currentInvoiceCategoryId);
+  document.getElementById('invoiceListTitle').textContent = cat ? `Facturas — ${cat.name}` : 'Facturas';
   const all = (await dbGetAll('invoiceEntries'))
     .filter(inv => inv.categoryId === currentInvoiceCategoryId)
     .sort((a, b) => (b.dateStr || '').localeCompare(a.dateStr || ''));
@@ -1811,14 +1865,21 @@ async function renderInvoicesListScreen(){
            ${isImage ? `<img src="${inv.fileDataUrl}" style="width:32px; height:32px; object-fit:cover; border-radius:4px;">` : '📄'} ${escapeHtml(inv.fileName || 'Ver adjunto')}
          </button>`
       : '';
+    const precioText = inv.precio != null ? `${inv.precio.toFixed(2)} €` : '—';
     return `
       <div class="card">
-        <button class="icon-btn" data-action="edit-invoice" data-id="${inv.id}" style="position:absolute; top:4px; right:34px;">✏️</button>
-        <button class="icon-btn danger" data-action="delete-invoice" data-id="${inv.id}">✕</button>
-        <div class="card-title">${escapeHtml(inv.concepto)}${inv.precio != null ? ` — ${inv.precio.toFixed(2)} €` : ''}</div>
-        <div class="card-muted">${formatDateRange(inv.dateStr)}</div>
-        ${inv.comentarios ? `<div class="card-muted">${escapeHtml(inv.comentarios)}</div>` : ''}
-        ${attachmentHtml}
+        <div class="invoice-summary" data-action="toggle-invoice" data-id="${inv.id}">
+          <span class="invoice-summary-text">${escapeHtml(inv.concepto)} · ${formatDateRange(inv.dateStr)} · ${precioText}</span>
+          <span class="invoice-caret" id="caret-${inv.id}">▸</span>
+        </div>
+        <div class="invoice-details" id="details-${inv.id}">
+          <button class="icon-btn" data-action="edit-invoice" data-id="${inv.id}" style="position:absolute; top:4px; right:34px;">✏️</button>
+          <button class="icon-btn danger" data-action="delete-invoice" data-id="${inv.id}">✕</button>
+          <div class="card-title">${escapeHtml(inv.concepto)}${inv.precio != null ? ` — ${inv.precio.toFixed(2)} €` : ''}</div>
+          <div class="card-muted">${formatDateRange(inv.dateStr)}</div>
+          ${inv.comentarios ? `<div class="card-muted">${escapeHtml(inv.comentarios)}</div>` : ''}
+          ${attachmentHtml}
+        </div>
       </div>
     `;
   }).join('') || '<p class="help-text">Sin facturas registradas en este apartado todavía.</p>';
@@ -1848,7 +1909,7 @@ document.getElementById('btnSaveInvoice').addEventListener('click', async () => 
   }
   await dbPut('invoiceEntries', record);
   resetInvoiceForm();
-  await renderInvoicesListScreen();
+  go('invoice-list');
 });
 document.getElementById('invoicesList').addEventListener('click', async (e) => {
   const viewBtn = e.target.closest('[data-action="view-attachment"]');
@@ -1870,18 +1931,99 @@ document.getElementById('invoicesList').addEventListener('click', async (e) => {
     label.textContent = formatDateRange(inv.dateStr); label.classList.add('selected');
     invoiceAttachment = inv.fileDataUrl ? { dataUrl: inv.fileDataUrl, fileName: inv.fileName, fileType: inv.fileType } : null;
     renderInvoiceAttachmentPreview();
+    document.getElementById('invoiceFormTitle').textContent = 'Editar factura';
     document.getElementById('btnSaveInvoice').textContent = '💾 Guardar cambios';
     document.getElementById('btnCancelInvoiceEdit').style.display = 'block';
-    document.querySelector('#screen-invoice-category .content').scrollTop = 0;
+    go('invoice-form');
     return;
   }
   const delBtn = e.target.closest('[data-action="delete-invoice"]');
-  if (delBtn && confirm('¿Eliminar esta factura?')) {
-    await dbDelete('invoiceEntries', delBtn.dataset.id);
-    if (editingInvoiceId === delBtn.dataset.id) resetInvoiceForm();
-    await renderInvoicesListScreen();
+  if (delBtn) {
+    if (confirm('¿Eliminar esta factura?')) {
+      await dbDelete('invoiceEntries', delBtn.dataset.id);
+      if (editingInvoiceId === delBtn.dataset.id) resetInvoiceForm();
+      await renderInvoicesListScreen();
+    }
+    return;
+  }
+  const toggleRow = e.target.closest('[data-action="toggle-invoice"]');
+  if (toggleRow) {
+    const id = toggleRow.dataset.id;
+    const details = document.getElementById(`details-${id}`);
+    const caret = document.getElementById(`caret-${id}`);
+    const isOpen = details.style.display === 'block';
+    details.style.display = isOpen ? 'none' : 'block';
+    caret.textContent = isOpen ? '▸' : '▾';
   }
 });
+
+/* ---------- estadísticas del apartado ---------- */
+async function renderInvoiceStatsScreen(){
+  const cat = await dbGet('invoiceCategories', currentInvoiceCategoryId);
+  document.getElementById('invoiceStatsTitle').textContent = cat ? `Estadísticas — ${cat.name}` : 'Estadísticas';
+  const all = (await dbGetAll('invoiceEntries')).filter(inv => inv.categoryId === currentInvoiceCategoryId);
+  const content = document.getElementById('invoiceStatsContent');
+  if (all.length === 0) {
+    content.innerHTML = '<p class="help-text">Todavía no hay facturas en este apartado para calcular estadísticas.</p>';
+    return;
+  }
+  const withPrice = all.filter(inv => inv.precio != null);
+  const totalFacturado = round2(withPrice.reduce((s, inv) => s + inv.precio, 0));
+  const promedio = withPrice.length ? round2(totalFacturado / withPrice.length) : 0;
+  const masCara = withPrice.length ? withPrice.reduce((a, b) => (b.precio > a.precio ? b : a)) : null;
+  const masBarata = withPrice.length ? withPrice.reduce((a, b) => (b.precio < a.precio ? b : a)) : null;
+
+  const byMonth = {};
+  withPrice.forEach(inv => {
+    if (!inv.dateStr) return;
+    const key = inv.dateStr.slice(0, 7);
+    byMonth[key] = (byMonth[key] || 0) + inv.precio;
+  });
+  const monthEntries = Object.entries(byMonth).sort((a, b) => a[0].localeCompare(b[0]));
+  const monthLabel = (key) => { const [y, m] = key.split('-').map(Number); return `${MONTH_NAMES[m - 1]} ${y}`; };
+  let topMonth = null;
+  monthEntries.forEach(([key, val]) => { if (!topMonth || val > topMonth[1]) topMonth = [key, val]; });
+
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+  const currentMonthTotal = round2(byMonth[currentMonthKey] || 0);
+  const prevMonthTotal = round2(byMonth[prevMonthKey] || 0);
+  let variacionText = 'Sin datos del mes anterior para comparar.';
+  if (prevMonthTotal > 0) {
+    const variacion = round2(((currentMonthTotal - prevMonthTotal) / prevMonthTotal) * 100);
+    variacionText = `${variacion > 0 ? '+' : ''}${variacion}% respecto al mes anterior`;
+  } else if (currentMonthTotal > 0) {
+    variacionText = 'No hubo gasto el mes anterior para comparar.';
+  }
+  const currentYear = now.getFullYear();
+  const totalAnioActual = round2(withPrice.filter(inv => (inv.dateStr || '').startsWith(String(currentYear))).reduce((s, inv) => s + inv.precio, 0));
+  const mediaMensual = monthEntries.length ? round2(totalFacturado / monthEntries.length) : 0;
+
+  content.innerHTML = `
+    <div class="section-title">Resumen</div>
+    <div class="ficha-card">
+      <div class="field-row-view"><span class="field-row-label">Nº de facturas</span><span class="field-row-value">${all.length}</span></div>
+      <div class="field-row-view"><span class="field-row-label">Total facturado</span><span class="field-row-value">${totalFacturado.toFixed(2)} €</span></div>
+      <div class="field-row-view"><span class="field-row-label">Precio medio por factura</span><span class="field-row-value">${promedio.toFixed(2)} €</span></div>
+      <div class="field-row-view" style="border-bottom:none;"><span class="field-row-label">Gasto medio mensual</span><span class="field-row-value">${mediaMensual.toFixed(2)} €</span></div>
+    </div>
+    <div class="section-title">Extremos</div>
+    <div class="ficha-card">
+      <div class="field-row-view"><span class="field-row-label">Factura más cara</span><span class="field-row-value">${masCara ? `${escapeHtml(masCara.concepto)} (${masCara.precio.toFixed(2)} €)` : '—'}</span></div>
+      <div class="field-row-view" style="border-bottom:none;"><span class="field-row-label">Factura más barata</span><span class="field-row-value">${masBarata ? `${escapeHtml(masBarata.concepto)} (${masBarata.precio.toFixed(2)} €)` : '—'}</span></div>
+    </div>
+    <div class="section-title">Por mes</div>
+    <div class="ficha-card">
+      <div class="field-row-view"><span class="field-row-label">Mes con más gasto</span><span class="field-row-value">${topMonth ? `${monthLabel(topMonth[0])} (${round2(topMonth[1]).toFixed(2)} €)` : '—'}</span></div>
+      <div class="field-row-view"><span class="field-row-label">Gasto este mes</span><span class="field-row-value">${currentMonthTotal.toFixed(2)} €</span></div>
+      <div class="field-row-view"><span class="field-row-label">Tendencia</span><span class="field-row-value">${variacionText}</span></div>
+      <div class="field-row-view" style="border-bottom:none;"><span class="field-row-label">Gasto en ${currentYear}</span><span class="field-row-value">${totalAnioActual.toFixed(2)} €</span></div>
+    </div>
+  `;
+}
+document.getElementById('btnCancelInvoiceEdit').addEventListener('click', () => { resetInvoiceForm(); history.back(); });
 
 /* ---------- exportar todas las facturas a Excel ---------- */
 let _xlsxLoadPromise = null;
